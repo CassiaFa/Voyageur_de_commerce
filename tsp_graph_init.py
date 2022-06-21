@@ -191,6 +191,7 @@ class Route:
             
             self.ordre.append(position) # on ajoute le lieu courant à la route
 
+        self.distance += Graph.matrice_od[self.ordre[-1],self.ordre[0]] # on ajoute la distance entre le dernier lieu de la route et le lieu de départ
         self.ordre.append(self.ordre[0]) # on ajoute le premier lieu à la route pour fermer la route
 
     def lieu_voisin_pondere(self, position, matrice_p):
@@ -205,14 +206,25 @@ class Route:
                     matrice de cout pondérée des OD
         """
 
-        vecteur_visibilite = (1/Graph.matrice_od[position])**b # on calcule le vecteur de visibilité
+        vecteur_visibilite = (1/Graph.matrice_od[position])**b # on calcule le vecteur de visibilité, connaitre la pondération de chaque lieu (probabilité d'être selectionné)
         vecteur_pp = matrice_p[position]**a # on calcule le vecteur de pondération
         destination = vecteur_pp*vecteur_visibilite # on calcule le vecteur destination
-        destination[np.isinf(destination)] = 0 # on supprime les valeurs infini
-        destination = destination/destination.sum() # on normalise le vecteur destination
+        # destination[np.isinf(destination)] = 0 # on supprime les valeurs infini
+        destination[np.ma.masked_array(destination, np.isin(list(range(nb_lieux)), self.ordre)).mask] = 0 # on supprime les valeurs déjà utilisées
+
+        destination = destination/destination.sum() # on normalise le vecteur destination, pour avoir une probabilité uniforme
         test = destination.tolist() # on convertit le vecteur destination en liste
 
         return np.random.choice(np.ma.masked_array(list(range(nb_lieux)), np.isin(list(range(nb_lieux)), self.ordre)), 1, p=test)[0]
+
+    def __eq__(self, other):
+        return self.ordre == other.ordre
+
+    def __gt__(self, other):
+        return self.distance > other.distance
+
+    def __str__(self):
+        return f"Ordre = {self.ordre}, \nDistance : {self.distance:.2f}"
 
 class Affichage:
     pass
@@ -239,47 +251,95 @@ class TSP_ACO:
     # Distance matrice_od
     # Comparaison route (__eq__, __lt__, __gt__, __le__, __ge__, __repr__, __neq__)
     best_route = None
+    quantite_pheromone = 200 # quantité de phéromone déposée
+    taux_evaporation = 0.5 # taux d'évaporation des phéromones
+
+    condition = 0
+    nb_iterations = 0
     
     @classmethod
-    def calculer_circuit_fourmis(cls):
-        # m fourmis placer au hasard dans n ville
-        # initialisation des phéromones ()
-        condition = 0
+    def calculer_meilleur_route(cls):
+        """
+        Méthode permetant de calculer la route optimale pour le problème du TSP avec l'algorithme ACO
+        """       
 
+        # on initialise la matrice de phéromone
         matrice_p = np.ones((nb_lieux,nb_lieux))/100
 
-        while condition != 1:
+
+        while cls.condition < 0.5:
             # générer les lieux
             # nombre de fourmis dans lieu (i)
             # fourmi choisi ville de destination j de la liste ville à visité
             # liste dépendante à chaque fourmis
 
-            cls.best_route = None
+            fourmis_route = []
+            
+            cls.condition = 0
+            cls.calculer_circuit_fourmis(fourmis_route, matrice_p)
 
-            for k in range(m):
-                depart = np.random.randint(nb_lieux) # à adapater pour éviter qu'un lieu ne soit jamais sélectionné
-                r = Route(depart)
-                r.calcul_distance_route(nb_lieux, matrice_p)
+            # mise à jour des phéromones
+            matrice_p = cls.mise_a_jour_pheromone(matrice_p, fourmis_route)
 
-                print(f" Fourmi {k} \n------------\nordre : {r.ordre} \ndistance : {r.distance} \n============")
+            cls.nb_iterations += 1
 
-
-            condition += 1
+            print(cls.nb_iterations)
+            print(cls.condition)
 
     @classmethod
-    def __gt__(cls):
-        pass
+    def calculer_circuit_fourmis(cls, fourmis_route, matrice_p):
+
+        for k in range(m):
+            depart = np.random.randint(nb_lieux) # à adapater pour éviter qu'un lieu ne soit jamais sélectionné
+            r = Route(depart)
+            r.calcul_distance_route(nb_lieux, matrice_p)
+
+            fourmis_route.append(r)
+
+            if cls.best_route is None :
+                cls.best_route = r
+
+            elif cls.best_route == r:
+                if cls.best_route > r:
+                    cls.best_route = r
+                
+                cls.condition += 1
+
+            elif cls.best_route > r:
+                cls.best_route = r
+                cls.condition = 0 # si best route est changé, on réinitialise la condition
+
+            # print(f" Fourmi {k} \n------------\nordre : {r.ordre} \ndistance : {r.distance} \n============")
         
+        cls.condition /= m
+
+
+    @classmethod
+    def mise_a_jour_pheromone(cls, matrice_p, fourmis_route):
+        """
+        Méthode permetant de mettre à jour la matrice de phéromone
+        """
+
+        matrice_ajout = np.zeros((nb_lieux,nb_lieux))
+
+        for f in fourmis_route:
+            for t in range(len(f.ordre)-1):
+                matrice_ajout[f.ordre[t],f.ordre[t+1]] += cls.quantite_pheromone / f.distance
+                
+
+        matrice_p = cls.taux_evaporation * matrice_p + matrice_ajout
+        
+        return matrice_p
 
          
 
 LARGEUR = 800
 HAUTEUR = 600
 
-nb_lieux = 5
-m = 12 # nombre de fourmis
-a = 0.5
-b = 0.2
+nb_lieux = 10
+m = nb_lieux # nombre de fourmis
+a = 2 # paramètre d'importance des phéromones
+b = 10 # paramètre d'importance des visibilité des lieux
 
 Graph.generation_lieux(nb_lieux, LARGEUR, HAUTEUR)
 # Graph.charger_graph("./graph_5.csv")
@@ -291,4 +351,6 @@ print("==========================")
 # r1 = Route(nb_lieux)
 # print(f"ordre : {r1.ordre} \ndistance : {r1.distance}")
 
-TSP_ACO.calculer_circuit_fourmis()
+TSP_ACO.calculer_meilleur_route()
+
+print(TSP_ACO.best_route)
